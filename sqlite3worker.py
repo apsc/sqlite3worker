@@ -73,6 +73,8 @@ class Sqlite3Worker(threading.Thread):
         self.exit_token = str(uuid.uuid4())
         self.start()
         self.thread_running = True
+        # Event that is triggered once the run_query has been executed
+        self.select_event = threading.Event()
 
     def run(self):
         """Thread loop.
@@ -101,6 +103,9 @@ class Sqlite3Worker(threading.Thread):
                     LOGGER.debug("run: commit")
                     self.sqlite3_conn.commit()
                     execute_count = 0
+                # Wake up the thread waiting on the execution of the select query.
+                if query.lower().strip().startswith("select"):
+                    self.select_event.set()
             # Only exit if the queue is empty. Otherwise keep getting
             # through the queue until it's empty.
             if self.exit_set and self.sql_queue.empty():
@@ -157,19 +162,15 @@ class Sqlite3Worker(threading.Thread):
         Returns:
             Return the results of the query when it's executed by the thread.
         """
-        delay = .001
-        while True:
+        try:
+            # Wait until the select query has executed
+            self.select_event.wait()
             if token in self.results:
                 return_val = self.results[token]
                 del self.results[token]
                 return return_val
-            # Double back on the delay to a max of 8 seconds.  This prevents
-            # a long lived select statement from trashing the CPU with this
-            # infinite loop as it's waiting for the query results.
-            LOGGER.debug("Sleeping: %s %s", delay, token)
-            time.sleep(delay)
-            if delay < 8:
-                delay += delay
+        finally:
+            self.select_event.clear()
 
     def execute(self, query, values=None):
         """Execute a query.
