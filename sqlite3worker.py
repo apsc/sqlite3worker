@@ -165,10 +165,9 @@ class Sqlite3Worker(threading.Thread):
         try:
             # Wait until the select query has executed
             self.select_event.wait()
-            if token in self.results:
-                return_val = self.results[token]
-                del self.results[token]
-                return return_val
+            return_val = self.results[token]
+            del self.results[token]
+            return return_val
         finally:
             self.select_event.clear()
 
