@@ -74,7 +74,7 @@ class Sqlite3Worker(threading.Thread):
         self.start()
         self.thread_running = True
         # Event that is triggered once the run_query has been executed
-        self.select_event = threading.Event()
+        self.select_event_dict = {}
 
     def run(self):
         """Thread loop.
@@ -105,7 +105,7 @@ class Sqlite3Worker(threading.Thread):
                     execute_count = 0
                 # Wake up the thread waiting on the execution of the select query.
                 if query.lower().strip().startswith("select"):
-                    self.select_event.set()
+                    self.select_event_dict[token].set()
             # Only exit if the queue is empty. Otherwise keep getting
             # through the queue until it's empty.
             if self.exit_set and self.sql_queue.empty():
@@ -164,12 +164,13 @@ class Sqlite3Worker(threading.Thread):
         """
         try:
             # Wait until the select query has executed
-            self.select_event.wait()
+            self.select_event_dict[token].wait()
             return_val = self.results[token]
             del self.results[token]
             return return_val
         finally:
-            self.select_event.clear()
+            self.select_event_dict[token].clear()
+            self.select_event_dict.pop(token)
 
     def execute(self, query, values=None):
         """Execute a query.
@@ -191,6 +192,7 @@ class Sqlite3Worker(threading.Thread):
         # If it's a select we queue it up with a token to mark the results
         # into the output queue so we know what results are ours.
         if query.lower().strip().startswith("select"):
+            self.select_event_dict[token] = threading.Event()
             self.sql_queue.put((token, query, values), timeout=5)
             return self.query_results(token)
         else:
